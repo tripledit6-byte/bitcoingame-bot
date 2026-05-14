@@ -1,0 +1,160 @@
+import sqlite3
+import random
+import time
+from config import CARS, GARAGES, MINING_FARMS, HOUSES
+
+db = sqlite3.connect("bitcoingame.db", check_same_thread=False)
+cursor = db.cursor()
+
+cursor.execute("""CREATE TABLE IF NOT EXISTS users(
+    user_id INTEGER PRIMARY KEY, coins INTEGER, level INTEGER, xp INTEGER,
+    wins INTEGER, loses INTEGER, last_bonus INTEGER, last_activity INTEGER,
+    current_car TEXT, race_wins INTEGER, race_loses INTEGER, clan_name TEXT,
+    current_garage TEXT, current_farm TEXT, current_house TEXT, last_farm_collect INTEGER)""")
+db.commit()
+
+cursor.execute("""CREATE TABLE IF NOT EXISTS user_cars(user_id INTEGER, car_id TEXT, PRIMARY KEY (user_id, car_id))""")
+db.commit()
+cursor.execute("""CREATE TABLE IF NOT EXISTS user_garages(user_id INTEGER, garage_id TEXT, PRIMARY KEY (user_id, garage_id))""")
+db.commit()
+cursor.execute("""CREATE TABLE IF NOT EXISTS user_farms(user_id INTEGER, farm_id TEXT, PRIMARY KEY (user_id, farm_id))""")
+db.commit()
+cursor.execute("""CREATE TABLE IF NOT EXISTS user_houses(user_id INTEGER, house_id TEXT, PRIMARY KEY (user_id, house_id))""")
+db.commit()
+
+def create_user(user_id):
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (user_id, 50000, 1, 0, 0, 0, 0, int(time.time()), "lada", 0, 0, None, "garage_1", "farm_1", "house_1", 0))
+        cursor.execute("INSERT INTO user_cars VALUES(?,?)", (user_id, "lada"))
+        cursor.execute("INSERT INTO user_garages VALUES(?,?)", (user_id, "garage_1"))
+        cursor.execute("INSERT INTO user_farms VALUES(?,?)", (user_id, "farm_1"))
+        cursor.execute("INSERT INTO user_houses VALUES(?,?)", (user_id, "house_1"))
+        db.commit()
+
+def get_user(user_id):
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    return cursor.fetchone()
+
+def update_activity(user_id):
+    cursor.execute("UPDATE users SET last_activity=? WHERE user_id=?", (int(time.time()), user_id))
+    db.commit()
+
+def add_coins(user_id, amount):
+    cursor.execute("UPDATE users SET coins = coins + ? WHERE user_id=?", (amount, user_id))
+    db.commit()
+    update_activity(user_id)
+
+def remove_coins(user_id, amount):
+    cursor.execute("UPDATE users SET coins = coins - ? WHERE user_id=?", (amount, user_id))
+    db.commit()
+    update_activity(user_id)
+
+def add_xp(user_id, amount):
+    user = get_user(user_id)
+    xp = user[3] + amount
+    level = user[2]
+    new_level = level
+    if xp >= level * 100:
+        xp = xp - (level * 100)
+        new_level = level + 1
+        add_coins(user_id, 500 * new_level)
+    cursor.execute("UPDATE users SET xp=?, level=? WHERE user_id=?", (xp, new_level, user_id))
+    db.commit()
+    return new_level > level
+
+def get_user_cars(user_id):
+    cursor.execute("SELECT car_id FROM user_cars WHERE user_id=?", (user_id,))
+    return [row[0] for row in cursor.fetchall()]
+
+def get_user_garages(user_id):
+    cursor.execute("SELECT garage_id FROM user_garages WHERE user_id=?", (user_id,))
+    return [row[0] for row in cursor.fetchall()]
+
+def get_user_farms(user_id):
+    cursor.execute("SELECT farm_id FROM user_farms WHERE user_id=?", (user_id,))
+    return [row[0] for row in cursor.fetchall()]
+
+def get_user_houses(user_id):
+    cursor.execute("SELECT house_id FROM user_houses WHERE user_id=?", (user_id,))
+    return [row[0] for row in cursor.fetchall()]
+
+def buy_car(user_id, car_id):
+    car = CARS[car_id]
+    user = get_user(user_id)
+    if user[1] >= car["price"]:
+        remove_coins(user_id, car["price"])
+        cursor.execute("INSERT OR IGNORE INTO user_cars VALUES(?, ?)", (user_id, car_id))
+        db.commit()
+        return True
+    return False
+
+def equip_car(user_id, car_id):
+    if car_id in get_user_cars(user_id):
+        cursor.execute("UPDATE users SET current_car=? WHERE user_id=?", (car_id, user_id))
+        db.commit()
+        return True
+    return False
+
+def buy_garage(user_id, garage_id):
+    garage = GARAGES[garage_id]
+    user = get_user(user_id)
+    if user[1] >= garage["price"]:
+        remove_coins(user_id, garage["price"])
+        cursor.execute("INSERT OR IGNORE INTO user_garages VALUES(?, ?)", (user_id, garage_id))
+        db.commit()
+        return True
+    return False
+
+def equip_garage(user_id, garage_id):
+    if garage_id in get_user_garages(user_id):
+        cursor.execute("UPDATE users SET current_garage=? WHERE user_id=?", (garage_id, user_id))
+        db.commit()
+        return True
+    return False
+
+def buy_farm(user_id, farm_id):
+    farm = MINING_FARMS[farm_id]
+    user = get_user(user_id)
+    if user[1] >= farm["price"]:
+        remove_coins(user_id, farm["price"])
+        cursor.execute("INSERT OR IGNORE INTO user_farms VALUES(?, ?)", (user_id, farm_id))
+        db.commit()
+        return True
+    return False
+
+def equip_farm(user_id, farm_id):
+    if farm_id in get_user_farms(user_id):
+        cursor.execute("UPDATE users SET current_farm=? WHERE user_id=?", (farm_id, user_id))
+        db.commit()
+        return True
+    return False
+
+def buy_house(user_id, house_id):
+    house = HOUSES[house_id]
+    user = get_user(user_id)
+    if user[1] >= house["price"]:
+        remove_coins(user_id, house["price"])
+        cursor.execute("INSERT OR IGNORE INTO user_houses VALUES(?, ?)", (user_id, house_id))
+        db.commit()
+        return True
+    return False
+
+def equip_house(user_id, house_id):
+    if house_id in get_user_houses(user_id):
+        cursor.execute("UPDATE users SET current_house=? WHERE user_id=?", (house_id, user_id))
+        db.commit()
+        return True
+    return False
+
+def get_mine_reward(level):
+    if level <= 5: return random.randint(30, 80)
+    elif level <= 10: return random.randint(60, 150)
+    elif level <= 20: return random.randint(100, 250)
+    elif level <= 30: return random.randint(200, 400)
+    elif level <= 50: return random.randint(350, 600)
+    else: return random.randint(500, 1000)
+
+def get_xp_to_next_level(level, current_xp):
+    return level * 100 - current_xp

@@ -1,0 +1,95 @@
+import asyncio
+import time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from database import get_user, add_coins, equip_farm, get_user_farms, buy_farm
+from config import MINING_FARMS, HOUSES
+from database import cursor, db
+
+async def farms_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, edit=True):
+    user = get_user(user_id)
+    current_farm_id = user[13]
+    current_farm = MINING_FARMS[current_farm_id]
+    current_house_id = user[14]
+    current_house = HOUSES[current_house_id]
+    
+    house_bonus = current_house["bonus_percent"]
+    base_income = current_farm["income"]
+    total_income = base_income + int(base_income * house_bonus / 100)
+    
+    text = f"⚡ МАЙНИНГОВАЯ ФЕРМА ⚡\n\n"
+    text += f"🏭 Текущая ферма: {current_farm['name']}\n"
+    text += f"💰 Доход каждые 10 мин: {total_income} BTC\n"
+    text += f"🏠 Бонус от дома: +{house_bonus}%\n\n"
+    text += f"📊 Доступные фермы:\n"
+    
+    keyboard = []
+    farms_owned = get_user_farms(user_id)
+    
+    for farm_id, farm in MINING_FARMS.items():
+        marker = "✅ " if farm_id == current_farm_id else "   "
+        if farm_id in farms_owned:
+            text += f"{marker}{farm['name']} - {farm['income']} BTC/10мин\n"
+            if farm_id != current_farm_id:
+                keyboard.append([InlineKeyboardButton(f"Экипировать {farm['name']}", callback_data=f"equip_farm_{farm_id}")])
+        else:
+            text += f"   {farm['name']} - {farm['price']} BTC ({farm['income']} BTC/10мин)\n"
+            keyboard.append([InlineKeyboardButton(f"Купить {farm['name']} за {farm['price']} BTC", callback_data=f"buy_farm_{farm_id}")])
+    
+    keyboard.append([InlineKeyboardButton("💰 Забрать доход", callback_data="collect_farm")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
+    
+    if edit:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def collect_farm_income(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id):
+    user = get_user(user_id)
+    now = int(time.time())
+    last_collect = user[15]
+    
+    if last_collect == 0:
+        last_collect = now
+    
+    minutes_passed = (now - last_collect) // 600
+    if minutes_passed < 1:
+        remaining = 600 - (now - last_collect)
+        remaining_min = remaining // 60
+        remaining_sec = remaining % 60
+        await update.callback_query.edit_message_text(
+            f"⏳ До сбора: {remaining_min} мин {remaining_sec} сек",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="farm_menu")]])
+        )
+        return
+    
+    current_farm = MINING_FARMS[user[13]]
+    current_house = HOUSES[user[14]]
+    house_bonus = current_house["bonus_percent"]
+    base_income = current_farm["income"]
+    income_per_10min = base_income + int(base_income * house_bonus / 100)
+    
+    total_income = income_per_10min * minutes_passed
+    add_coins(user_id, total_income)
+    
+    cursor.execute("UPDATE users SET last_farm_collect=? WHERE user_id=?", (now, user_id))
+    db.commit()
+    
+    await update.callback_query.edit_message_text(
+        f"💰 Получено: {total_income} BTC!\n\n💰 Баланс: {get_user(user_id)[1]} BTC",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="farm_menu")]])
+    )
+
+async def buy_farm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, farm_id):
+    if buy_farm(user_id, farm_id):
+        await update.callback_query.answer(f"✅ Куплена {MINING_FARMS[farm_id]['name']}!")
+    else:
+        await update.callback_query.answer("❌ Недостаточно BTC!")
+    await farms_menu(update, context, user_id, True)
+
+async def equip_farm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, farm_id):
+    if equip_farm(user_id, farm_id):
+        await update.callback_query.answer(f"✅ Экипирована {MINING_FARMS[farm_id]['name']}!")
+    else:
+        await update.callback_query.answer("❌ Ошибка!")
+    await farms_menu(update, context, user_id, True)

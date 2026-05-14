@@ -1,0 +1,56 @@
+TOKEN = "8840608538:AAEjiZp367G73DMkBPqHLXsFE1FR0Zg4hOI"
+
+CARS = {
+    "lada": {"name": "🚗 Лада Гранта", "price": 50000, "speed": 45, "handling": 35},
+    "priora": {"name": "🚙 Лада Приора", "price": 75000, "speed": 50, "handling": 40},
+    "logan": {"name": "🚘 Renault Logan", "price": 100000, "speed": 55, "handling": 45},
+    "solaris": {"name": "🏎 Hyundai Solaris", "price": 150000, "speed": 62, "handling": 52},
+    "rio": {"name": "🏁 Kia Rio", "price": 200000, "speed": 65, "handling": 55},
+    "focus": {"name": "⚡ Ford Focus", "price": 300000, "speed": 72, "handling": 60},
+    "octavia": {"name": "🔥 Skoda Octavia", "price": 450000, "speed": 78, "handling": 65},
+    "bmw3": {"name": "💨 BMW 3 Series", "price": 650000, "speed": 85, "handling": 70},
+    "audi4": {"name": "🎯 Audi A4", "price": 850000, "speed": 90, "handling": 72},
+    "mercedes": {"name": "👑 Mercedes C-Class", "price": 1000000, "speed": 94, "handling": 75},
+    "subaru": {"name": "🏆 Subaru WRX", "price": 1500000, "speed": 98, "handling": 80},
+    "porsche": {"name": "🐎 Porsche 911", "price": 2500000, "speed": 105, "handling": 85},
+    "lamborghini": {"name": "🐂 Lamborghini", "price": 5000000, "speed": 115, "handling": 90},
+    "ferrari": {"name": "🐎 Ferrari", "price": 8000000, "speed": 120, "handling": 92},
+    "bugatti": {"name": "⚡ Bugatti Chiron", "price": 15000000, "speed": 130, "handling": 95}
+}
+
+OPPONENTS = {
+    "easy": {"name": "🚶 Новичок", "speed": 40, "reward": 500, "entry": 100},
+    "medium": {"name": "🏃 Гонщик", "speed": 65, "reward": 1200, "entry": 300},
+    "hard": {"name": "🔥 Профи", "speed": 85, "reward": 2500, "entry": 700},
+    "expert": {"name": "⭐ Чемпион", "speed": 105, "reward": 5000, "entry": 1500},
+    "legend": {"name": "👑 Легенда", "speed": 125, "reward": 10000, "entry": 3500}
+}
+
+GARAGES = {
+    "garage_1": {"name": "🏠 Маленький гараж", "price": 50000, "capacity": 3, "income": 50},
+    "garage_2": {"name": "🏢 Средний гараж", "price": 150000, "capacity": 6, "income": 100},
+    "garage_3": {"name": "🏭 Большой гараж", "price": 300000, "capacity": 10, "income": 200},
+    "garage_4": {"name": "🏰 Элитный гараж", "price": 600000, "capacity": 15, "income": 400},
+    "garage_5": {"name": "👑 Подземный бункер", "price": 1000000, "capacity": 25, "income": 800}
+}
+
+MINING_FARMS = {
+    "farm_1": {"name": "⚡ Малая ферма", "price": 100000, "income": 1000, "bonus": 0},
+    "farm_2": {"name": "🔥 Средняя ферма", "price": 300000, "income": 2500, "bonus": 5},
+    "farm_3": {"name": "💎 Большая ферма", "price": 700000, "income": 5000, "bonus": 10},
+    "farm_4": {"name": "👑 Гигантская ферма", "price": 1500000, "income": 10000, "bonus": 20},
+    "farm_5": {"name": "⭐ Мега ферма", "price": 3000000, "income": 20000, "bonus": 35},
+    "farm_6": {"name": "🚀 Космическая ферма", "price": 7000000, "income": 45000, "bonus": 50},
+    "farm_7": {"name": "💀 Легендарная ферма", "price": 15000000, "income": 100000, "bonus": 75}
+}
+
+HOUSES = {
+    "house_1": {"name": "🏚 Времянка", "price": 70000, "bonus_percent": 2},
+    "house_2": {"name": "🏠 Маленький дом", "price": 150000, "bonus_percent": 5},
+    "house_3": {"name": "🏡 Уютный дом", "price": 350000, "bonus_percent": 10},
+    "house_4": {"name": "🏘 Особняк", "price": 800000, "bonus_percent": 18},
+    "house_5": {"name": "🏰 Вилла", "price": 1800000, "bonus_percent": 30},
+    "house_6": {"name": "👑 Дворец", "price": 4000000, "bonus_percent": 50},
+    "house_7": {"name": "⭐ Райский остров", "price": 10000000, "bonus_percent": 80},
+    "house_8": {"name": "🚀 Космическая станция", "price": 25000000, "bonus_percent": 120}
+}

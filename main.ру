@@ -1,0 +1,533 @@
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+import sqlite3
+import random
+import time
+import asyncio
+from datetime import datetime
+
+from config import TOKEN, CARS, OPPONENTS, GARAGES, MINING_FARMS, HOUSES
+from database import *
+from mining_farm import farms_menu, collect_farm_income, buy_farm_handler, equip_farm_handler
+
+# =========================
+# ФУНКЦИИ ДЛЯ ГАРАЖЕЙ
+# =========================
+
+async def garages_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, edit=True):
+    user = get_user(user_id)
+    current_garage_id = user[12]
+    current_garage = GARAGES[current_garage_id]
+    
+    cars_owned = get_user_cars(user_id)
+    text = f"🏢 ГАРАЖ 🏢\n\n"
+    text += f"🏠 Текущий гараж: {current_garage['name']}\n"
+    text += f"📦 Вместимость: {current_garage['capacity']} машин\n"
+    text += f"🚗 У тебя машин: {len(cars_owned)}\n"
+    text += f"💰 Доход от гаража: {current_garage['income']} BTC/час\n\n"
+    text += f"📊 Доступные гаражи:\n"
+    
+    keyboard = []
+    garages_owned = get_user_garages(user_id)
+    
+    for garage_id, garage in GARAGES.items():
+        marker = "✅ " if garage_id == current_garage_id else "   "
+        if garage_id in garages_owned:
+            text += f"{marker}{garage['name']} - вмест.{garage['capacity']}, доход {garage['income']} BTC/час\n"
+            if garage_id != current_garage_id:
+                keyboard.append([InlineKeyboardButton(f"Экипировать {garage['name']}", callback_data=f"equip_garage_{garage_id}")])
+        else:
+            text += f"   {garage['name']} - {garage['price']} BTC (вмест.{garage['capacity']})\n"
+            keyboard.append([InlineKeyboardButton(f"Купить {garage['name']} за {garage['price']} BTC", callback_data=f"buy_garage_{garage_id}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
+    
+    if edit:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def buy_garage_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, garage_id):
+    if buy_garage(user_id, garage_id):
+        await update.callback_query.answer(f"✅ Куплен {GARAGES[garage_id]['name']}!")
+    else:
+        await update.callback_query.answer("❌ Недостаточно BTC!")
+    await garages_menu(update, context, user_id, True)
+
+async def equip_garage_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, garage_id):
+    if equip_garage(user_id, garage_id):
+        await update.callback_query.answer(f"✅ Экипирован {GARAGES[garage_id]['name']}!")
+    else:
+        await update.callback_query.answer("❌ Ошибка!")
+    await garages_menu(update, context, user_id, True)
+
+# =========================
+# ФУНКЦИИ ДЛЯ ДОМОВ
+# =========================
+
+async def houses_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, edit=True):
+    user = get_user(user_id)
+    current_house_id = user[14]
+    current_house = HOUSES[current_house_id]
+    
+    text = f"🏠 ДОМ 🏠\n\n"
+    text += f"🏡 Текущий дом: {current_house['name']}\n"
+    text += f"📈 Бонус к доходу: +{current_house['bonus_percent']}%\n\n"
+    text += f"📊 Доступные дома:\n"
+    
+    keyboard = []
+    houses_owned = get_user_houses(user_id)
+    
+    for house_id, house in HOUSES.items():
+        marker = "✅ " if house_id == current_house_id else "   "
+        if house_id in houses_owned:
+            text += f"{marker}{house['name']} - +{house['bonus_percent']}% к доходу\n"
+            if house_id != current_house_id:
+                keyboard.append([InlineKeyboardButton(f"Экипировать {house['name']}", callback_data=f"equip_house_{house_id}")])
+        else:
+            text += f"   {house['name']} - {house['price']} BTC (+{house['bonus_percent']}%)\n"
+            keyboard.append([InlineKeyboardButton(f"Купить {house['name']} за {house['price']} BTC", callback_data=f"buy_house_{house_id}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back")])
+    
+    if edit:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def buy_house_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, house_id):
+    if buy_house(user_id, house_id):
+        await update.callback_query.answer(f"✅ Куплен {HOUSES[house_id]['name']}!")
+    else:
+        await update.callback_query.answer("❌ Недостаточно BTC!")
+    await houses_menu(update, context, user_id, True)
+
+async def equip_house_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, house_id):
+    if equip_house(user_id, house_id):
+        await update.callback_query.answer(f"✅ Экипирован {HOUSES[house_id]['name']}!")
+    else:
+        await update.callback_query.answer("❌ Ошибка!")
+    await houses_menu(update, context, user_id, True)
+
+# =========================
+# КАЗИНО
+# =========================
+
+def casino_bet(bet_amount):
+    win_chance = 45
+    win = random.randint(1, 100) <= win_chance
+    if win:
+        multiplier = random.uniform(1.5, 3.0)
+        win_amount = int(bet_amount * multiplier)
+        return True, win_amount
+    else:
+        return False, bet_amount
+
+# =========================
+# МЕНЮ
+# =========================
+
+def menu():
+    keyboard = [
+        [InlineKeyboardButton("⛏ Майнить", callback_data="mine")],
+        [InlineKeyboardButton("🎰 Казино", callback_data="casino"), InlineKeyboardButton("🎁 Бонус", callback_data="bonus")],
+        [InlineKeyboardButton("👤 Профиль", callback_data="profile"), InlineKeyboardButton("🏆 Топ", callback_data="top")],
+        [InlineKeyboardButton("🏎 Гонки", callback_data="race_menu")],
+        [InlineKeyboardButton("🏢 Гараж", callback_data="garage_menu")],
+        [InlineKeyboardButton("⚡ Ферма", callback_data="farm_menu")],
+        [InlineKeyboardButton("🏠 Дом", callback_data="house_menu")],
+        [InlineKeyboardButton("💰 Передать BTC", callback_data="transfer")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def casino_menu():
+    keyboard = [
+        [InlineKeyboardButton("💰 100 BTC", callback_data="casino_100")],
+        [InlineKeyboardButton("💰 500 BTC", callback_data="casino_500")],
+        [InlineKeyboardButton("💰 1000 BTC", callback_data="casino_1000")],
+        [InlineKeyboardButton("💰 5000 BTC", callback_data="casino_5000")],
+        [InlineKeyboardButton("💰 10000 BTC", callback_data="casino_10000")],
+        [InlineKeyboardButton("🎲 Своя ставка", callback_data="casino_custom")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def race_menu():
+    keyboard = [
+        [InlineKeyboardButton("🏁 Начать гонку", callback_data="start_race")],
+        [InlineKeyboardButton("🚗 Мои машины", callback_data="my_cars")],
+        [InlineKeyboardButton("🏪 Купить машину", callback_data="buy_car_menu")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def buy_car_menu():
+    keyboard = []
+    for car_id, car in CARS.items():
+        keyboard.append([InlineKeyboardButton(f"{car['name']} - {car['price']} BTC", callback_data=f"buy_{car_id}")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="race_menu")])
+    return InlineKeyboardMarkup(keyboard)
+
+def race_opponent_menu():
+    keyboard = []
+    for opp_id, opp in OPPONENTS.items():
+        keyboard.append([InlineKeyboardButton(f"{opp['name']} | Вход: {opp['entry']} BTC", callback_data=f"race_{opp_id}")])
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="race_menu")])
+    return InlineKeyboardMarkup(keyboard)
+
+# =========================
+# ОСНОВНЫЕ ОБРАБОТЧИКИ
+# =========================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    create_user(user_id)
+    update_activity(user_id)
+    await update.message.reply_text(
+        "💰 Добро пожаловать в BitcoinGame!\n\n"
+        "🎮 Возможности:\n"
+        "⛏ Майнинг (награда растет с уровнем)\n"
+        "🎰 Казино (ставь любую сумму, шанс 45%%)\n"
+        "🏎 Гонки на машинах\n"
+        "🏢 Гаражи (пассивный доход и хранение машин)\n"
+        "⚡ Майнинговые фермы (доход каждые 10 минут)\n"
+        "🏠 Дома (бонус к доходу от фермы)\n"
+        "💰 Перевод BTC между игроками\n\n"
+        "🚀 Начинай играть!",
+        reply_markup=menu()
+    )
+
+async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender_id = update.effective_user.id
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("❌ Используй: /send ID сумма\nПример: /send 123456789 1000")
+            return
+        receiver_id = int(args[0])
+        amount = int(args[1])
+        if amount < 100:
+            await update.message.reply_text("❌ Минимальная сумма: 100 BTC")
+            return
+        if sender_id == receiver_id:
+            await update.message.reply_text("❌ Нельзя себе!")
+            return
+        sender = get_user(sender_id)
+        if sender[1] < amount:
+            await update.message.reply_text(f"❌ Не хватает! У тебя: {sender[1]} BTC")
+            return
+        receiver = get_user(receiver_id)
+        if not receiver:
+            await update.message.reply_text("❌ Пользователь не найден")
+            return
+        remove_coins(sender_id, amount)
+        add_coins(receiver_id, amount)
+        await update.message.reply_text(f"✅ Переведено {amount} BTC пользователю ID {receiver_id}")
+    except:
+        await update.message.reply_text("❌ Ошибка! Пример: /send 123456789 1000")
+
+async def my_cars_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    user = get_user(user_id)
+    cars = get_user_cars(user_id)
+    text = "🚗 ТВОИ МАШИНЫ 🚗\n\n"
+    for c in cars:
+        marker = "✅ " if c == user[8] else "   "
+        text += f"{marker}{CARS[c]['name']} (⚡{CARS[c]['speed']})\n"
+    kb = [[InlineKeyboardButton(f"Экипировать {CARS[c]['name']}", callback_data=f"equip_{c}")] for c in cars if c != user[8]]
+    kb.append([InlineKeyboardButton("🔙 Назад", callback_data="race_menu")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text
+    
+    if context.user_data.get('waiting_for_casino_bet'):
+        try:
+            bet_amount = int(text)
+            if bet_amount < 50:
+                await update.message.reply_text("❌ Минимальная ставка: 50 BTC!", reply_markup=menu())
+                context.user_data.pop('waiting_for_casino_bet', None)
+                return
+            
+            user = get_user(user_id)
+            if user[1] < bet_amount:
+                await update.message.reply_text(f"❌ Недостаточно BTC! У тебя: {user[1]} BTC", reply_markup=menu())
+                context.user_data.pop('waiting_for_casino_bet', None)
+                return
+            
+            remove_coins(user_id, bet_amount)
+            win, result = casino_bet(bet_amount)
+            
+            if win:
+                add_coins(user_id, result)
+                add_xp(user_id, 10)
+                text_msg = f"🎉 ПОБЕДА! 🎉\n\n"
+                text_msg += f"💰 Ставка: {bet_amount} BTC\n"
+                text_msg += f"💵 Выигрыш: {result} BTC\n"
+                text_msg += f"📈 Чистый выигрыш: +{result - bet_amount} BTC\n"
+                text_msg += f"⭐ +10 XP"
+            else:
+                text_msg = f"💀 ПРОИГРЫШ! 💀\n\n"
+                text_msg += f"💰 Ставка: {bet_amount} BTC\n"
+                text_msg += f"💸 Потеряно: {bet_amount} BTC"
+            
+            user = get_user(user_id)
+            text_msg += f"\n\n💰 Твой баланс: {user[1]} BTC"
+            await update.message.reply_text(text_msg, reply_markup=menu())
+            
+        except ValueError:
+            await update.message.reply_text("❌ Введи число!", reply_markup=menu())
+        
+        context.user_data.pop('waiting_for_casino_bet', None)
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    create_user(user_id)
+    update_activity(user_id)
+    user = get_user(user_id)
+    
+    # МАЙНИНГ
+    if query.data == "mine":
+        reward = get_mine_reward(user[2])
+        xp_reward = 15
+        add_coins(user_id, reward)
+        level_up = add_xp(user_id, xp_reward)
+        user = get_user(user_id)
+        xp_needed = get_xp_to_next_level(user[2], user[3])
+        
+        text = f"⛏ Ты намайнил {reward} BTC!\n⭐ +{xp_reward} XP\n\n"
+        text += f"💰 Баланс: {user[1]} BTC\n"
+        text += f"⭐ Уровень: {user[2]}\n"
+        text += f"⚡ XP: {user[3]}/{user[2] * 100}\n"
+        text += f"📊 До следующего уровня: {xp_needed} XP"
+        
+        if level_up:
+            text = f"🎉 ПОЗДРАВЛЯЮ! {user[2]} уровень! +{500 * user[2]} BTC 🎉\n\n" + text
+        
+        await query.edit_message_text(text, reply_markup=menu())
+    
+    # КАЗИНО
+    elif query.data == "casino":
+        await query.edit_message_text("🎰 КАЗИНО\n\nВыбери сумму ставки:\n🎲 Шанс на выигрыш: 45%\n💰 Выигрыш: x1.5 - x3 от ставки", reply_markup=casino_menu())
+    
+    elif query.data.startswith("casino_"):
+        bet_amount = None
+        if query.data == "casino_100":
+            bet_amount = 100
+        elif query.data == "casino_500":
+            bet_amount = 500
+        elif query.data == "casino_1000":
+            bet_amount = 1000
+        elif query.data == "casino_5000":
+            bet_amount = 5000
+        elif query.data == "casino_10000":
+            bet_amount = 10000
+        elif query.data == "casino_custom":
+            await query.edit_message_text("✏️ Введи сумму ставки (минимум 50 BTC):", reply_markup=menu())
+            context.user_data['waiting_for_casino_bet'] = True
+            return
+        
+        if bet_amount:
+            if user[1] < bet_amount:
+                await query.edit_message_text(f"❌ Недостаточно BTC! У тебя: {user[1]} BTC", reply_markup=casino_menu())
+                return
+            
+            remove_coins(user_id, bet_amount)
+            win, result = casino_bet(bet_amount)
+            
+            if win:
+                add_coins(user_id, result)
+                add_xp(user_id, 10)
+                text = f"🎉 ПОБЕДА! 🎉\n\n"
+                text += f"💰 Ставка: {bet_amount} BTC\n"
+                text += f"💵 Выигрыш: {result} BTC\n"
+                text += f"📈 Чистый выигрыш: +{result - bet_amount} BTC\n"
+                text += f"⭐ +10 XP"
+            else:
+                text = f"💀 ПРОИГРЫШ! 💀\n\n"
+                text += f"💰 Ставка: {bet_amount} BTC\n"
+                text += f"💸 Потеряно: {bet_amount} BTC"
+            
+            user = get_user(user_id)
+            text += f"\n\n💰 Твой баланс: {user[1]} BTC"
+            await query.edit_message_text(text, reply_markup=casino_menu())
+    
+    # БОНУС
+    elif query.data == "bonus":
+        now = int(time.time())
+        if now - user[6] < 3600:
+            left = (3600 - (now - user[6])) // 60
+            await query.edit_message_text(f"⏳ Бонус через {left} мин", reply_markup=menu())
+            return
+        reward = random.randint(100, 300)
+        add_coins(user_id, reward)
+        cursor.execute("UPDATE users SET last_bonus=? WHERE user_id=?", (now, user_id))
+        db.commit()
+        await query.edit_message_text(f"🎁 БОНУС! +{reward} BTC", reply_markup=menu())
+    
+    # ПРОФИЛЬ
+    elif query.data == "profile":
+        car = CARS[user[8]]
+        garage = GARAGES[user[12]]
+        farm = MINING_FARMS[user[13]]
+        house = HOUSES[user[14]]
+        xp_needed = get_xp_to_next_level(user[2], user[3])
+        
+        await query.edit_message_text(
+            f"👤 ПРОФИЛЬ\n\n"
+            f"🆔 ID: {user_id}\n"
+            f"💰 BTC: {user[1]}\n"
+            f"⭐ Уровень: {user[2]}\n"
+            f"⚡ XP: {user[3]}/{user[2] * 100}\n"
+            f"📊 До уровня: {xp_needed} XP\n"
+            f"🏆 Побед в казино: {user[4]}\n"
+            f"❌ Поражений в казино: {user[5]}\n"
+            f"🏎 Побед в гонках: {user[9]}\n"
+            f"💀 Поражений в гонках: {user[10]}\n"
+            f"🚗 Машина: {car['name']}\n"
+            f"🏢 Гараж: {garage['name']}\n"
+            f"⚡ Ферма: {farm['name']}\n"
+            f"🏠 Дом: {house['name']}\n"
+            f"👥 Клан: {user[11] if user[11] else 'Нет'}",
+            reply_markup=menu()
+        )
+    
+    # ТОП
+    elif query.data == "top":
+        cursor.execute("SELECT user_id, coins, level FROM users ORDER BY coins DESC LIMIT 10")
+        top = cursor.fetchall()
+        text = "🏆 ТОП 10 ИГРОКОВ 🏆\n\n"
+        for i, p in enumerate(top, 1):
+            text += f"{i}. ID {p[0]} — {p[1]} BTC (⭐ Ур.{p[2]})\n"
+        await query.edit_message_text(text, reply_markup=menu())
+    
+    # ПЕРЕВОД
+    elif query.data == "transfer":
+        await query.edit_message_text("💰 /send ID сумма\nПример: /send 123456789 1000\n\nМинимальная сумма: 100 BTC", reply_markup=menu())
+    
+    # ГОНКИ
+    elif query.data == "race_menu":
+        await query.edit_message_text("🏎 БИТКОИН ГОНКИ 🏎\n\nВыбери действие:", reply_markup=race_menu())
+    
+    elif query.data == "start_race":
+        car = CARS[user[8]]
+        await query.edit_message_text(f"🚗 Твоя машина: {car['name']} (⚡{car['speed']})\n💰 Твой баланс: {user[1]} BTC\n\nВыбери соперника:", reply_markup=race_opponent_menu())
+    
+    elif query.data == "my_cars":
+        await my_cars_handler(update, context)
+    
+    elif query.data == "buy_car_menu":
+        await query.edit_message_text("🏪 ВЫБЕРИ МАШИНУ ДЛЯ ПОКУПКИ:", reply_markup=buy_car_menu())
+    
+    elif query.data.startswith("buy_"):
+        car_id = query.data.replace("buy_", "")
+        if buy_car(user_id, car_id):
+            await query.edit_message_text(f"✅ Ты купил {CARS[car_id]['name']}!", reply_markup=buy_car_menu())
+        else:
+            await query.edit_message_text(f"❌ Недостаточно BTC! Нужно: {CARS[car_id]['price']} BTC", reply_markup=buy_car_menu())
+    
+    elif query.data.startswith("equip_"):
+        car_id = query.data.replace("equip_", "")
+        if equip_car(user_id, car_id):
+            await query.answer("✅ Машина экипирована!")
+        else:
+            await query.answer("❌ Ошибка!")
+        await my_cars_handler(update, context)
+    
+    elif query.data.startswith("race_"):
+        opp_id = query.data.replace("race_", "")
+        opp = OPPONENTS[opp_id]
+        if user[1] < opp['entry']:
+            await query.edit_message_text(f"❌ Нужно {opp['entry']} BTC!", reply_markup=race_menu())
+            return
+        remove_coins(user_id, opp['entry'])
+        car = CARS[user[8]]
+        power = car['speed'] + car['handling']/2
+        chance = min(95, power / (power + opp['speed'] + 50) * 100)
+        win = random.randint(1, 100) <= chance
+        await query.edit_message_text(f"🏁 ГОНКА! {car['name']} vs {opp['name']}...")
+        await asyncio.sleep(2)
+        if win:
+            reward = opp['reward'] + random.randint(0, 500)
+            add_coins(user_id, reward)
+            add_xp(user_id, 25)
+            cursor.execute("UPDATE users SET race_wins = race_wins + 1 WHERE user_id=?", (user_id,))
+            db.commit()
+            text = f"🎉 ПОБЕДА! +{reward} BTC\n⭐ +25 XP\n💰 Возврат: +{opp['entry']} BTC"
+        else:
+            cursor.execute("UPDATE users SET race_loses = race_loses + 1 WHERE user_id=?", (user_id,))
+            db.commit()
+            text = f"💀 ПОРАЖЕНИЕ!\n💸 Взнос потерян: -{opp['entry']} BTC"
+        user = get_user(user_id)
+        text += f"\n💰 Баланс: {user[1]} BTC"
+        await query.edit_message_text(text, reply_markup=race_menu())
+    
+    # ГАРАЖ
+    elif query.data == "garage_menu":
+        await garages_menu(update, context, user_id, True)
+    
+    elif query.data.startswith("buy_garage_"):
+        garage_id = query.data.replace("buy_garage_", "")
+        await buy_garage_handler(update, context, user_id, garage_id)
+    
+    elif query.data.startswith("equip_garage_"):
+        garage_id = query.data.replace("equip_garage_", "")
+        await equip_garage_handler(update, context, user_id, garage_id)
+    
+    # ФЕРМА
+    elif query.data == "farm_menu":
+        await farms_menu(update, context, user_id, True)
+    
+    elif query.data == "collect_farm":
+        await collect_farm_income(update, context, user_id)
+    
+    elif query.data.startswith("buy_farm_"):
+        farm_id = query.data.replace("buy_farm_", "")
+        await buy_farm_handler(update, context, user_id, farm_id)
+    
+    elif query.data.startswith("equip_farm_"):
+        farm_id = query.data.replace("equip_farm_", "")
+        await equip_farm_handler(update, context, user_id, farm_id)
+    
+    # ДОМ
+    elif query.data == "house_menu":
+        await houses_menu(update, context, user_id, True)
+    
+    elif query.data.startswith("buy_house_"):
+        house_id = query.data.replace("buy_house_", "")
+        await buy_house_handler(update, context, user_id, house_id)
+    
+    elif query.data.startswith("equip_house_"):
+        house_id = query.data.replace("equip_house_", "")
+        await equip_house_handler(update, context, user_id, house_id)
+    
+    elif query.data == "back":
+        await query.edit_message_text("💰 Главное меню", reply_markup=menu())
+
+# =========================
+# MAIN
+# =========================
+
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("send", send_command))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    print("🚀 BitcoinGame ЗАПУЩЕН!")
+    print("✅ Гаражи (вместимость машин)")
+    print("✅ Майнинговые фермы (доход каждые 10 минут)")
+    print("✅ Дома (бонус к доходу от фермы)")
+    print("✅ Казино со ставками")
+    print("✅ Гонки на машинах")
+    
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
